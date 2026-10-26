@@ -212,6 +212,12 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
 .vol input{width:100%;min-width:0;accent-color:var(--sun);cursor:pointer}
 .vol b{font-family:var(--f-display);font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
 @media (max-width:560px){.vols{grid-template-columns:1fr}}
+.mode{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:2px;background:rgba(255,255,255,.03);cursor:pointer}
+.mode:has(input:checked){border-color:var(--tomato);background:rgba(200,57,43,.12)}
+.mode input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--tomato);cursor:pointer}
+.mode b{display:block;font-family:var(--f-display);font-weight:500;letter-spacing:.08em;text-transform:uppercase;font-size:15px}
+.mode small{display:block;font-size:14px;color:var(--mute);margin-top:2px}
+.chip.surv{background:var(--tomato);color:#fff}
 </style>
 
 <canvas id="c" aria-label="Escena del juego"></canvas>
@@ -231,6 +237,7 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
       <div class="chips">
         <div class="chip fury" id="chipFury" hidden>Furia x2 · 12</div>
         <div class="chip ice" id="chipIce" hidden>Congelados · 10</div>
+        <div class="chip surv" id="chipSurv" hidden>Supervivencia</div>
       </div>
     </div>
     <div class="tr">
@@ -288,6 +295,10 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
       <label class="vol" for="musicVolM"><span class="lbl">Música</span><input id="musicVolM" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
       <label class="vol" for="sfxVolM"><span class="lbl">Efectos</span><input id="sfxVolM" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
     </div>
+    <label class="mode" for="survivalM">
+      <input id="survivalM" type="checkbox">
+      <span><b>Modo supervivencia</b><small>La vida no se recupera: ni al superar una oleada ni con botiquines.</small></span>
+    </label>
     <button class="go" id="playBtn" type="button">¡A defender!</button>
     <p class="tip" id="bestTxt" hidden></p>
   </div>
@@ -656,7 +667,7 @@ const wallR=y=>{const w=R*(1.03-.03*clamp(y/H,0,1));return y<.7?Math.max(w,R+.5-
 const climbRad=zb=>wallR(zb.g.position.y)+.3*zb.s;
 function placeOnWall(zb){const P=zb.g.position,rr=climbRad(zb);P.x=Math.sin(zb.ang)*rr;P.z=Math.cos(zb.ang)*rr;zb.g.rotation.y=zb.ang+Math.PI;}
 function startClimb(zb){zb.state='climb';zb.ang=Math.atan2(zb.g.position.x,zb.g.position.z);placeOnWall(zb);}
-function knockOff(zb,nx,nz,power,up){if(zb.dead)return;zb.state='fall';zb.fallFrom=zb.g.position.y;zb.vx=nx*power;zb.vz=nz*power;zb.vy=up;
+function knockOff(zb,nx,nz,power,up){if(zb.dead)return;zb.state='fall';zb.nearAlerted=false;zb.fallFrom=zb.g.position.y;zb.vx=nx*power;zb.vz=nz*power;zb.vy=up;
   if(zb.fallFrom>3)SFX.whistle([zb.g.position.x,zb.g.position.y,zb.g.position.z]);}
 const outward=zb=>[Math.sin(zb.ang),Math.cos(zb.ang)];
 
@@ -666,6 +677,8 @@ let state='menu',kills=0,unlocked=0,cur=0,cooldown=0,switchT=0,kick=0,firing=fal
 let hurtFlash=0,hurtSnd=0,shake=0,bobT=0,stepPhase=0,groanGap=0,scratchGap=0,heartT=0,menuT=0,menuSpawn=0,lastTouch=0,touchUI=false,tipT=0,tipShown=false;
 let gtime=0,lastKillT=-9,combo=0,slowT=0,swayX=0,swayY=0,climbing=0,onTopN=0,filterKey='',leanCur=0;
 let emptyGap=0,furyT=0,iceT=0,kickCD=0,kickT=0,kickDone=true;
+let alertGap=0,nearGap=0,biteGap=0,redFlash=0;   // warning sounds, bite stamps and red flash timers
+const bites=[],dmgDirs=[];                       // bite marks on screen; where the damage is coming from
 let mouseX=window.innerWidth/2,mouseY=window.innerHeight/2;
 const inv=[];          // weapon indices in the belt, oldest on the left
 const AM={};           // per weapon: {mag, res, rl: reload seconds left, rt: reload length}
@@ -700,6 +713,25 @@ function initAudio(){
     startAmbience();loadMusic();loadVoices();
   }catch(e){AC=null;}
 }
+/* ---------- audio files ---------- */
+// Over http(s) the MP3s are fetched from next to the page. A page opened from disk (file://) may not fetch
+// its neighbours, so there the same files come from audio-data.js (built by tools/build-audio-data.py),
+// which a <script> tag is allowed to load.
+let audioBundleP=null;
+function audioBundle(){
+  return audioBundleP||(audioBundleP=new Promise((ok,no)=>{
+    if(window.TORRE_AUDIO)return ok(window.TORRE_AUDIO);
+    const s=document.createElement('script');s.src='audio-data.js';
+    s.onload=()=>window.TORRE_AUDIO?ok(window.TORRE_AUDIO):no(new Error('audio-data.js vacío'));
+    s.onerror=()=>no(new Error('falta audio-data.js'));document.head.appendChild(s);
+  }));
+}
+function loadBytes(path){
+  if(location.protocol==='file:')return audioBundle().then(b=>{
+    const s=b[path];if(!s)throw new Error('sin '+path);
+    const bin=atob(s),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u.buffer;});
+  return fetch(path).then(r=>{if(!r.ok)throw new Error(path+' '+r.status);return r.arrayBuffer();});
+}
 /* ---------- recorded zombie voices (sfx/*.mp3, published next to the page) ---------- */
 // Each file is cut at its silences on load; long continuous takes are cut again at their quieter dips.
 const VOICE_FILES={big:'zombie-big',dying:'zombie-dying',female:'zombie-female-screams',a:'zombie-sound',b:'zombie-sound-2',c:'zombie-sound-3'};
@@ -726,7 +758,7 @@ function capPeak(buf,db){
   if(pk>cap){const k=cap/pk;for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<d.length;i++)d[i]*=k;}}
 }
 function loadVoices(){
-  for(const k in VOICE_FILES)fetch('sfx/'+VOICE_FILES[k]+'.mp3').then(r=>{if(!r.ok)throw new Error(k);return r.arrayBuffer();})
+  for(const k in VOICE_FILES)loadBytes('sfx/'+VOICE_FILES[k]+'.mp3')
     .then(b=>new Promise((ok,no)=>AC.decodeAudioData(b,ok,no))).then(buf=>{capPeak(buf,k in PEAK_CAP_DB?PEAK_CAP_DB[k]:PEAK_CAP_DEFAULT);VOICES[k]={buf,segs:splitSegments(buf)};}).catch(()=>{});
 }
 const voicePool=zb=>zb.kind==='brute'?['big']:(zb.female?['female']:['a','b','c']);
@@ -753,7 +785,7 @@ let musicG=null,musicMuted=false;
 function loadMusic(){
   if(musicG)return;
   musicG=AC.createGain();musicG.gain.value=0;musicG.connect(musicBus);
-  fetch('hive-mind.mp3').then(r=>{if(!r.ok)throw new Error('music '+r.status);return r.arrayBuffer();})
+  loadBytes('hive-mind.mp3')
     .then(b=>new Promise((ok,no)=>AC.decodeAudioData(b,ok,no)))
     .then(buf=>{const s=AC.createBufferSource();s.buffer=buf;s.loop=true;s.connect(musicG);s.start();})
     .catch(()=>{});
@@ -817,6 +849,10 @@ const SFX={
   hurt(){tone(300,120,.2,.22,'sawtooth',{wet:.05});noise(.12,800,1,.2,'bandpass',{wet:0});},
   groan(pos){const f=rand(85,125);tone(f,f*.6,.9,.14,'sawtooth',{pos,wet:.35});tone(f*1.5,f*.9,.8,.05,'square',{pos,wet:.3});},
   scratch(pos){noise(.25,2200,2,.16,'bandpass',{pos,wet:.1},1100);},
+  // warnings carry farther than other effects (ref 9 m) so a climber is heard before it is seen
+  climbStart(pos){tone(660,655,.09,.2,'triangle',{pos,wet:.15,ref:9});tone(495,490,.14,.2,'triangle',{pos,wet:.15,ref:9,delay:.12});},
+  nearTop(pos){for(let k=0;k<3;k++)tone(900,880,.06,.26,'square',{pos,wet:.1,ref:9,delay:k*.1});},
+  bite(){noise(.1,900,1.2,.4,'bandpass',{wet:0});tone(170,80,.12,.3,'sawtooth',{wet:0});},
   step(){noise(.06,260,1.2,.12,'bandpass',{wet:0});tone(110,80,.05,.05,'sine',{wet:0});},
   swap(){noise(.03,2500,2,.14,'bandpass',{wet:0});tone(600,900,.06,.05,'sine',{wet:0,delay:.06});},
   reload(){noise(.05,2200,3,.18,'bandpass',{wet:0});noise(.05,1500,3,.15,'bandpass',{wet:0,delay:.14});},
@@ -944,6 +980,72 @@ const ov=$('ov'),og=ov.getContext('2d'),nums=[],pv=new THREE.Vector3();
 let ovW=0,ovH=0,ovDpr=1,hitT=0,crossX=0,crossY=0;
 function sizeOv(){ovDpr=Math.min(window.devicePixelRatio||1,2);ovW=window.innerWidth;ovH=window.innerHeight;ov.width=Math.round(ovW*ovDpr);ov.height=Math.round(ovH*ovDpr);}
 sizeOv();window.addEventListener('resize',sizeOv);
+// bite marks: a few variants drawn once (bruise, two arched rows of tooth punctures, blood runs), stamped when bitten
+function makeBite(seed){
+  const c=document.createElement('canvas');c.width=260;c.height=220;const g=c.getContext('2d');
+  let s=seed;const r=()=>{s=(s*16807)%2147483647;return s/2147483647;};
+  const cx=130,cy=100,br=g.createRadialGradient(cx,cy,8,cx,cy,112);
+  br.addColorStop(0,'rgba(95,0,0,.42)');br.addColorStop(.6,'rgba(70,0,0,.22)');br.addColorStop(1,'rgba(70,0,0,0)');g.fillStyle=br;g.fillRect(0,0,260,220);
+  const tooth=(x,y)=>{g.save();g.translate(x,y);g.rotate(Math.atan2(cy-y,cx-x)+Math.PI/2);
+    g.fillStyle='rgba(60,0,0,.9)';g.beginPath();g.ellipse(0,0,5+r()*3,8+r()*5,0,0,7);g.fill();
+    g.fillStyle='rgba(150,10,10,.75)';g.beginPath();g.ellipse(0,-1,2.5+r()*2,4+r()*3,0,0,7);g.fill();g.restore();};
+  const lower=[];
+  for(let i=0;i<8;i++){const a=Math.PI*(.16+.68*i/7),x=cx+Math.cos(a)*(78+r()*6);
+    tooth(x,cy-16-Math.sin(a)*30+r()*4);const ly=cy+16+Math.sin(a)*30+r()*4;tooth(x+r()*4-2,ly);lower.push([x,ly]);}
+  g.lineCap='round';
+  for(let k=0;k<3;k++){const [x,y]=lower[1+((r()*6)|0)],len=20+r()*55;
+    g.strokeStyle='rgba(110,0,0,.8)';g.lineWidth=3+r()*3;g.beginPath();g.moveTo(x,y);g.lineTo(x+r()*4-2,y+len);g.stroke();
+    g.fillStyle='rgba(110,0,0,.85)';g.beginPath();g.arc(x,y+len,3+r()*2.5,0,7);g.fill();}
+  for(let k=0;k<14;k++){g.fillStyle='rgba(120,0,0,'+(.4+r()*.5)+')';g.beginPath();g.arc(cx+(r()-.5)*200,cy+(r()-.5)*170,1+r()*3.5,0,7);g.fill();}
+  return c;
+}
+const BITES=[makeBite(11),makeBite(29),makeBite(53)];
+// where a world point sits relative to the view: on screen (with pixel position) or off screen (with the edge direction)
+const csv=new THREE.Vector3();
+function screenInfo(x,y,z){
+  csv.set(x,y,z).applyMatrix4(camera.matrixWorldInverse);const behind=csv.z>0;
+  pv.set(x,y,z).project(camera);
+  const on=!behind&&Math.abs(pv.x)<.92&&Math.abs(pv.y)<.86;
+  // camera-space x/y already say which way to turn (right/left, up/down), in front of the camera or behind it
+  const dx=csv.x,dy=Math.abs(csv.x)+Math.abs(csv.y)<1e-3?-1:csv.y;
+  return{on,sx:(pv.x*.5+.5)*ovW,sy:(-pv.y*.5+.5)*ovH,ang:Math.atan2(-dy,dx)};
+}
+let edgeBottom=0;   // lowest y an edge arrow may use: just above the health/ammo panel
+function edgeTriangle(ang,size,color,alpha){
+  const cx=ovW/2,cy=ovH/2,px=cx+Math.cos(ang)*ovW*.43,py=Math.min(cy+Math.sin(ang)*ovH*.4,edgeBottom);
+  og.save();og.translate(px,py);og.rotate(ang);og.globalAlpha=alpha;
+  og.beginPath();og.moveTo(size,0);og.lineTo(-size*.7,-size*.75);og.lineTo(-size*.35,0);og.lineTo(-size*.7,size*.75);og.closePath();
+  og.fillStyle=color;og.fill();og.lineWidth=1.5;og.strokeStyle='rgba(0,0,0,.6)';og.stroke();og.restore();
+}
+// climbers: a marker over the ones in view, an arrow at the screen edge for the rest, and a count; amber turns red near the top
+function drawClimbers(){
+  let n=0;const bars=document.querySelector('.bars');edgeBottom=(bars?bars.getBoundingClientRect().top:ovH)-22;
+  for(const zb of zombies){
+    if(zb.dead||zb.state!=='climb')continue;n++;
+    const P=zb.g.position,prog=P.y/H,danger=prog>.72,pulse=danger?.55+.45*Math.abs(Math.sin(gtime*9)):.85;
+    const col=danger?'#e0402e':'#e0a23a',si=screenInfo(P.x,P.y+2.2*zb.s,P.z);
+    if(si.on){og.save();og.globalAlpha=pulse;og.translate(si.sx,si.sy-6);
+      og.beginPath();og.moveTo(0,8);og.lineTo(-8,-6);og.lineTo(8,-6);og.closePath();og.fillStyle=col;og.fill();og.lineWidth=1.5;og.strokeStyle='rgba(0,0,0,.6)';og.stroke();
+      og.fillStyle='rgba(0,0,0,.55)';og.fillRect(-12,-16,24,4);og.fillStyle=col;og.fillRect(-12,-16,24*prog,4);og.restore();}
+    else edgeTriangle(si.ang,danger?15:12,col,pulse);
+  }
+  if(n){const txt=n===1?'1 zombi trepando':n+' zombis trepando';og.font='500 15px Oswald, "Arial Narrow", sans-serif';
+    const w=og.measureText(txt.toUpperCase()).width+28,x=ovW/2-w/2,y=ovW<760?132:64;
+    og.globalAlpha=.88;og.fillStyle='rgba(14,16,14,.78)';og.fillRect(x,y,w,26);og.fillStyle='#e0a23a';og.fillRect(x,y,3,26);
+    og.globalAlpha=1;og.fillStyle='#ece6d6';og.textAlign='center';og.textBaseline='middle';og.fillText(txt.toUpperCase(),ovW/2+1,y+13.5);}
+}
+// damage: red flash, bite marks, and a red arc toward each zombie biting you
+function drawDamage(dt){
+  if(redFlash>0){redFlash=Math.max(0,redFlash-dt);const a=redFlash/.35,g=og.createRadialGradient(ovW/2,ovH/2,Math.min(ovW,ovH)*.2,ovW/2,ovH/2,Math.max(ovW,ovH)*.7);
+    g.addColorStop(0,'rgba(140,0,0,'+(.12*a)+')');g.addColorStop(1,'rgba(160,0,0,'+(.55*a)+')');og.globalAlpha=1;og.fillStyle=g;og.fillRect(0,0,ovW,ovH);}
+  for(let i=bites.length-1;i>=0;i--){const b=bites[i];b.t+=dt;if(b.t>b.life){bites.splice(i,1);continue;}
+    const a=b.t<.06?b.t/.06:Math.max(0,1-(b.t-.5)/(b.life-.5));
+    og.save();og.globalAlpha=a*.92;og.translate(b.x,b.y);og.rotate(b.rot);og.scale(b.s*(1+Math.max(0,.08-b.t)*3),b.s);og.drawImage(BITES[b.v],-130,-100);og.restore();}
+  for(let i=dmgDirs.length-1;i>=0;i--){const d=dmgDirs[i];d.t-=dt;if(d.t<=0||d.z.dead){dmgDirs.splice(i,1);continue;}
+    const P=d.z.g.position,si=screenInfo(P.x,P.y+1.4,P.z),cx=ovW/2,cy=ovH/2,rad=Math.min(ovW,ovH)*.24;
+    og.save();og.globalAlpha=Math.min(1,d.t)*.85;og.strokeStyle='#d0281c';og.lineWidth=7;og.lineCap='round';
+    og.beginPath();og.arc(cx,cy,rad,si.ang-.32,si.ang+.32);og.stroke();og.restore();}
+}
 function dmgNum(x,y,z,txt,cls){
   return; // floating numbers belong to the cartoon version
   nums.push({x,y,z,txt,t:0,dx:rand(-.5,.5),big:cls==='head',col:cls==='head'?COL.sun:(cls==='fury'?COL.ember:COL.paper)});
@@ -962,6 +1064,7 @@ function updateNums(dt){
     og.font=(n.big?34:26)+'px Bangers, Impact, sans-serif';
     og.fillStyle=COL.ink;og.fillText(n.txt,3,3);og.lineWidth=4;og.strokeStyle=COL.ink;og.strokeText(n.txt,0,0);og.fillStyle=n.col;og.fillText(n.txt,0,0);
     og.restore();}
+  drawDamage(dt);drawClimbers();og.globalAlpha=1;
   hitT=Math.max(0,hitT-dt);
   if(camera.fov<30)return;
   // thin four-tick crosshair; a hit draws a short X around it
@@ -985,7 +1088,8 @@ const DROPS={
 };
 const drops=[],crateG=new THREE.BoxGeometry(.46,.46,.46),markG=new THREE.BoxGeometry(.48,.12,.48),ballG=new THREE.SphereGeometry(.34,14,12),stringG=new THREE.CylinderGeometry(.008,.008,.62,4);
 function spawnDrop(x,y,z,onTop){
-  const r=Math.random(),type=r<.58?'ammo':r<.76?'vida':r<.89?'furia':'hielo',d=DROPS[type];
+  // in survival mode there are no medkits: that share of drops becomes ammo
+  const r=Math.random(),type=r<.58?'ammo':r<.76?(runSurvival?'ammo':'vida'):r<.89?'furia':'hielo',d=DROPS[type];
   const g=new THREE.Group();g.position.set(x,Math.max(y,.3),z);
   const crate=shadowy(mesh(crateG,toon(d.crate),0,0,0),true,false);outl(crate,1.1);
   const mk=mesh(markG,toon(d.mark));crate.add(mk);
@@ -1379,7 +1483,8 @@ function updateZombie(zb,dt,i){
       zb.legL.rotation.x=sw*.6;zb.legR.rotation.x=-sw*.6;
       zb.armL.rotation.x=-Math.PI/2+sw*.15;zb.armR.rotation.x=-Math.PI/2-sw*.15;
       zb.head.rotation.z=Math.sin(zb.t*.9+zb.wob)*.2;
-      if(d<=wallR(0)+.3*s){P.y=0;zb.g.rotation.z=0;startClimb(zb);}
+      if(d<=wallR(0)+.3*s){P.y=0;zb.g.rotation.z=0;startClimb(zb);
+        if(state==='play'&&alertGap<=0){SFX.climbStart([P.x,1.6*s,P.z]);alertGap=.35;}}
       break;}
     case 'climb':{
       zb.t+=dt*zb.climb*5*slow;P.y+=zb.climb*slow*dt;placeOnWall(zb);
@@ -1387,6 +1492,7 @@ function updateZombie(zb,dt,i){
       zb.armL.rotation.x=-Math.PI+sw*.45;zb.armR.rotation.x=-Math.PI-sw*.45;
       zb.legL.rotation.x=.18-sw*.22;zb.legR.rotation.x=.18+sw*.22;zb.g.rotation.x=.03;zb.g.rotation.z=sw*.05;zb.head.rotation.z=0;
       if(P.y>H-5&&state==='play'&&scratchGap<=0&&Math.random()<dt*1.2){SFX.scratch([P.x,P.y,P.z]);scratchGap=.35;}
+      if(!zb.nearAlerted&&P.y>H-3.5&&state==='play'){zb.nearAlerted=true;if(nearGap<=0){SFX.nearTop([P.x,P.y+1.6*s,P.z]);nearGap=.5;}}
       if(Math.random()<dt*.8)burst(P.x,P.y+1.6*s,P.z,1,0xa49cab,.8,.05,.6);
       if(P.y>=H){P.y=H;zb.state='top';zb.g.rotation.x=0;zb.g.rotation.z=0;const rr=lim-.05;P.x=Math.sin(zb.ang)*rr;P.z=Math.cos(zb.ang)*rr;}
       break;}
@@ -1398,7 +1504,7 @@ function updateZombie(zb,dt,i){
       if(d>reach){P.x+=dx/d*zb.spd*.8*slow*dt;P.z+=dz/d*zb.spd*.8*slow*dt;const sw=Math.sin(zb.t*2);zb.legL.rotation.x=sw*.6;zb.legR.rotation.x=-sw*.6;
         zb.armL.rotation.x=zb.armR.rotation.x=-Math.PI/2;}
       else{const sw=Math.sin(zb.t*2.4);zb.armL.rotation.x=-Math.PI/2+sw*.6;zb.armR.rotation.x=-Math.PI/2-sw*.6;
-        if(state==='play')hurt(zb.k.dps*slow*dt);}
+        if(state==='play')hurt(zb.k.dps*slow*dt,zb);}
       const rr=Math.hypot(P.x,P.z);if(rr>lim){P.x*=lim/rr;P.z*=lim/rr;}P.y=H;
       break;}
     case 'fall':{
@@ -1455,16 +1561,26 @@ function updateWave(dt){
   if(wave.rest>0){wave.rest-=dt;if(wave.rest<=0)startWave(wave.n+1);return;}
   if(wave.left>0){wave.t-=dt;if(wave.t<=0&&aliveCount()<45){spawnWaveZombie();wave.left--;wave.t=wave.gap*rand(.5,1.5);}}
   else if(aliveCount()===0){
-    wave.rest=6;player.hp=Math.min(100,player.hp+25);
+    wave.rest=6;if(!runSurvival)player.hp=Math.min(100,player.hp+25);
     for(const wi of inv)if(AM[wi].res!==INF)AM[wi].res+=WEAPONS[wi].mag;
-    banner('¡Oleada '+wave.n+' superada!','+25 de vida · +1 cargador por arma');SFX.waveClear();
+    banner('¡Oleada '+wave.n+' superada!',(runSurvival?'Sin curación':'+25 de vida')+' · +1 cargador por arma');SFX.waveClear();
   }
 }
 
 /* ================= PLAYER & WEAPON HANDLING ================= */
-function hurt(a){
+// src: the zombie doing the biting. Each bite stamps a mark on screen, flashes red and points toward the attacker.
+function hurt(a,src){
   player.hp-=a;hurtFlash=Math.min(1,hurtFlash+a*.06);shake=Math.max(shake,.15);
   if(hurtSnd<=0){SFX.hurt();hurtSnd=.45;}
+  if(src){
+    const d=dmgDirs.find(q=>q.z===src);if(d)d.t=1.2;else dmgDirs.push({z:src,t:1.2});
+    if(biteGap<=0){
+      biteGap=src.kind==='brute'?.45:.6;redFlash=.35;SFX.bite();
+      const side=Math.random()<.5?-1:1,w=window.innerWidth,h=window.innerHeight;
+      bites.push({x:w/2+side*w*rand(.12,.38),y:h*rand(.18,.78),rot:rand(-.6,.6),s:rand(.75,1.15)*(src.kind==='brute'?1.25:1),v:(Math.random()*BITES.length)|0,t:0,life:1.8});
+      if(bites.length>7)bites.shift();
+    }
+  }
   if(player.hp<=0){player.hp=0;gameOver();}
 }
 // switching takes a quarter second; each weapon reloads on its own and keeps reloading while holstered,
@@ -1604,9 +1720,16 @@ $('pauseBtn').addEventListener('click',()=>{if(state==='play')pauseGame();});
 
 /* ================= GAME FLOW ================= */
 const menuEl=$('menu'),pauseEl=$('pause'),overEl=$('over'),hudEl=$('hud');
-function readBest(){try{return JSON.parse(localStorage.getItem('torreZombiRealBest')||'null');}catch(e){return null;}}
-function writeBest(b){try{localStorage.setItem('torreZombiRealBest',JSON.stringify(b));}catch(e){}}
-function showBest(){const b=readBest(),el=$('bestTxt');if(b){el.textContent='Récord: oleada '+b.wave+' · '+b.kills+' bajas';el.hidden=false;}}
+// survival mode: chosen in the menu (remembered in this browser), fixed for the length of a game, with its own record
+let survival=false,runSurvival=false;
+try{survival=localStorage.getItem('torreZombiSurvival')==='1';}catch(_){}
+const bestKey=surv=>surv?'torreZombiRealBestSurv':'torreZombiRealBest';
+function readBest(surv){try{return JSON.parse(localStorage.getItem(bestKey(surv))||'null');}catch(e){return null;}}
+function writeBest(surv,b){try{localStorage.setItem(bestKey(surv),JSON.stringify(b));}catch(e){}}
+function showBest(){const b=readBest(survival),el=$('bestTxt');
+  if(b){el.textContent='Récord'+(survival?' en supervivencia':'')+': oleada '+b.wave+' · '+b.kills+' bajas';el.hidden=false;}else el.hidden=true;}
+$('survivalM').checked=survival;
+$('survivalM').addEventListener('change',e=>{survival=e.target.checked;try{localStorage.setItem('torreZombiSurvival',survival?'1':'0');}catch(_){}showBest();});
 showBest();
 function setPlaying(on){document.body.classList.toggle('playing',on);hudEl.hidden=!on;$('touch').hidden=!(on&&touchUI);vmRoot.visible=on;}
 function resetGame(){
@@ -1614,12 +1737,14 @@ function resetGame(){
   Object.assign(player,{x:0,z:.5,yaw:0,pitch:-.3,hp:100});
   kills=0;unlocked=0;cooldown=0;kick=0;firing=false;zooming=false;dragging=false;hurtFlash=0;shake=0;lastHud='';combo=0;slowT=0;gtime=0;lastKillT=-9;
   furyT=0;iceT=0;leanCur=0;kickCD=0;kickT=0;kickDone=true;kickLeg.visible=false;
+  alertGap=nearGap=biteGap=redFlash=0;bites.length=0;dmgDirs.length=0;
   inv.length=0;for(const k in AM)delete AM[k];addWeapon(0);cur=-1;equip(0,true);
   mouseX=window.innerWidth/2;mouseY=window.innerHeight/2;
   camera.fov=72;camera.updateProjectionMatrix();canvas.style.filter='';filterKey='';
   updateHud();
 }
 function startGame(){
+  runSurvival=survival;$('chipSurv').hidden=!runSurvival;
   initAudio();resetGame();state='play';
   menuEl.hidden=true;overEl.hidden=true;pauseEl.hidden=true;setPlaying(true);
   startWave(1);showWname();tipT=0;tipShown=false;tryLock();
@@ -1631,9 +1756,9 @@ function gameOver(){
   state='over';firing=false;zooming=false;dragging=false;setPlaying(false);document.body.classList.remove('zoomed');hud.scope.hidden=true;canvas.style.filter='';hud.tint.className='';
   if(locked()&&document.exitPointerLock)document.exitPointerLock();
   $('oWave').textContent=wave.n;$('oKills').textContent=kills;$('oWeapon').textContent=WEAPONS[unlocked].name;
-  const b=readBest();let msg;
-  if(!b||wave.n>b.wave||(wave.n===b.wave&&kills>b.kills)){writeBest({wave:wave.n,kills});msg='¡Nuevo récord!';}
-  else msg='Récord: oleada '+b.wave+' · '+b.kills+' bajas.';
+  const b=readBest(runSurvival),mode=runSurvival?' en supervivencia':'';let msg;
+  if(!b||wave.n>b.wave||(wave.n===b.wave&&kills>b.kills)){writeBest(runSurvival,{wave:wave.n,kills});msg='¡Nuevo récord'+mode+'!';}
+  else msg='Récord'+mode+': oleada '+b.wave+' · '+b.kills+' bajas.';
   $('oBest').textContent=msg;showBest();overEl.hidden=false;
 }
 // volume sliders: the same two settings appear in the menu and the pause screen
@@ -1713,6 +1838,7 @@ function updatePlay(dt){
   separate();
   updateProjs(dt);updateDrops(dt);
   // feedback
+  alertGap-=dt;nearGap-=dt;biteGap-=dt;
   hurtSnd-=dt;groanGap-=dt;scratchGap-=dt;hurtFlash=Math.max(0,hurtFlash-dt*1.4);shake=Math.max(0,shake-dt*2.2);
   hud.vig.style.opacity=Math.min(.85,hurtFlash+(player.hp<30?.25+Math.sin(performance.now()/200)*.1:0));
   if(player.hp<35){heartT-=dt;if(heartT<=0){SFX.heart();heartT=.55+player.hp/35*.5;}}
