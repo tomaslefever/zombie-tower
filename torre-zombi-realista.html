@@ -286,7 +286,7 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
     </dl>
     <div class="vols">
       <label class="vol" for="musicVolM"><span class="lbl">Música</span><input id="musicVolM" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
-      <label class="vol" for="sfxVolM"><span class="lbl">Efectos</span><input id="sfxVolM" type="range" min="0" max="100" step="1" value="60"><b>60%</b></label>
+      <label class="vol" for="sfxVolM"><span class="lbl">Efectos</span><input id="sfxVolM" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
     </div>
     <button class="go" id="playBtn" type="button">¡A defender!</button>
     <p class="tip" id="bestTxt" hidden></p>
@@ -300,7 +300,7 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
     <p class="lead">Los zombis se quedan congelados hasta que vuelvas.</p>
     <div class="vols">
       <label class="vol" for="musicVolP"><span class="lbl">Música</span><input id="musicVolP" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
-      <label class="vol" for="sfxVolP"><span class="lbl">Efectos</span><input id="sfxVolP" type="range" min="0" max="100" step="1" value="60"><b>60%</b></label>
+      <label class="vol" for="sfxVolP"><span class="lbl">Efectos</span><input id="sfxVolP" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
     </div>
     <button class="go" id="resumeBtn" type="button">Continuar</button>
   </div>
@@ -681,7 +681,7 @@ const isCurrentRun=()=>window.__torreRun===RUN;
 try{if(window.__torreAC&&window.__torreAC.state!=='closed')window.__torreAC.close();}catch(_){}
 let AC=null,NB=null,master=null,sfxBus=null,musicBus=null,revSend=null,amb=null,cricketT=0;
 // two volume channels the player controls; remembered in this browser only
-const VOL={music:.8,sfx:.6};
+const VOL={music:.8,sfx:.8};
 try{const v=JSON.parse(localStorage.getItem('torreZombiVol')||'null');
   if(v){if(typeof v.music==='number')VOL.music=clamp(v.music,0,1);if(typeof v.sfx==='number')VOL.sfx=clamp(v.sfx,0,1);}}catch(_){}
 function applyVolumes(){if(!AC)return;const t=AC.currentTime;musicBus.gain.setTargetAtTime(VOL.music,t,.05);sfxBus.gain.setTargetAtTime(VOL.sfx,t,.05);}
@@ -717,15 +717,17 @@ function splitSegments(buf){
   }
   return segs.map(s=>[s[0]*.02,s[1]*.02]);
 }
-// cap each recording at -12 dBFS (0.251 linear): a file that peaks higher is scaled down, a quieter one is left alone
-const PEAK_CAP=Math.pow(10,-12/20);
-function capPeak(buf){
+// cap each recording's peak (dBFS): a file that peaks higher is scaled down, a quieter one is left alone.
+// -12 dB by default; the big zombie's growl is allowed up to -4 dB so it stands out
+const PEAK_CAP_DB={big:-4},PEAK_CAP_DEFAULT=-12;
+function capPeak(buf,db){
+  const cap=Math.pow(10,db/20);
   let pk=0;for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<d.length;i++){const a=d[i]<0?-d[i]:d[i];if(a>pk)pk=a;}}
-  if(pk>PEAK_CAP){const k=PEAK_CAP/pk;for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<d.length;i++)d[i]*=k;}}
+  if(pk>cap){const k=cap/pk;for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<d.length;i++)d[i]*=k;}}
 }
 function loadVoices(){
   for(const k in VOICE_FILES)fetch('sfx/'+VOICE_FILES[k]+'.mp3').then(r=>{if(!r.ok)throw new Error(k);return r.arrayBuffer();})
-    .then(b=>new Promise((ok,no)=>AC.decodeAudioData(b,ok,no))).then(buf=>{capPeak(buf);VOICES[k]={buf,segs:splitSegments(buf)};}).catch(()=>{});
+    .then(b=>new Promise((ok,no)=>AC.decodeAudioData(b,ok,no))).then(buf=>{capPeak(buf,k in PEAK_CAP_DB?PEAK_CAP_DB[k]:PEAK_CAP_DEFAULT);VOICES[k]={buf,segs:splitSegments(buf)};}).catch(()=>{});
 }
 const voicePool=zb=>zb.kind==='brute'?['big']:(zb.female?['female']:['a','b','c']);
 const voiceRate=zb=>zb.kind==='brute'?rand(.86,.95):(zb.female?rand(.97,1.06):rand(.9,1.1));
