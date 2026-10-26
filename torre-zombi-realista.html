@@ -195,6 +195,9 @@ html,body{color:var(--paper)}
 #reload.out{background:rgba(200,57,43,.88);color:#fff}
 #shade{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,transparent 58%,rgba(0,0,0,.5) 100%)}
 #grain{position:fixed;inset:0;pointer-events:none;opacity:.08;mix-blend-mode:overlay}
+/* lighter graphics levels drop the effects the browser has to recompute over the 3D view every frame */
+body.q-lite .sticker{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(14,16,14,.88)}
+body.q-lite #grain{display:none}
 .overlay{background:linear-gradient(90deg,rgba(6,8,6,.94) 0%,rgba(6,8,6,.62) 52%,rgba(6,8,6,.12) 100%)}
 .card{box-shadow:none}
 .eyebrow{background:transparent;color:var(--sun);padding:0;letter-spacing:.26em}
@@ -218,6 +221,16 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
 .mode b{display:block;font-family:var(--f-display);font-weight:500;letter-spacing:.08em;text-transform:uppercase;font-size:15px}
 .mode small{display:block;font-size:14px;color:var(--mute);margin-top:2px}
 .chip.surv{background:var(--tomato);color:#fff}
+.qual{display:grid;grid-template-columns:4.6em minmax(0,1fr);gap:6px 10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:2px;background:rgba(255,255,255,.03)}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:2px;overflow:hidden;min-width:0}
+.seg label{position:relative;cursor:pointer;min-width:0}
+.seg input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.seg span{display:block;text-align:center;padding:6px 2px;font-family:var(--f-display);font-weight:500;letter-spacing:.08em;text-transform:uppercase;font-size:13px;color:var(--mute)}
+.seg label+label span{border-left:1px solid var(--line)}
+.seg input:checked+span{background:var(--sun);color:#14110a}
+.seg input:focus-visible+span{outline:2px solid var(--sun);outline-offset:-2px}
+.qnote{grid-column:1/-1;font-size:13px;color:var(--mute)}
+.qnote:empty{display:none}
 </style>
 
 <canvas id="c" aria-label="Escena del juego"></canvas>
@@ -295,6 +308,16 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
       <label class="vol" for="musicVolM"><span class="lbl">Música</span><input id="musicVolM" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
       <label class="vol" for="sfxVolM"><span class="lbl">Efectos</span><input id="sfxVolM" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
     </div>
+    <div class="qual" role="radiogroup" aria-label="Calidad gráfica">
+      <span class="lbl">Gráficos</span>
+      <div class="seg">
+        <label for="qAutoM"><input type="radio" name="qualM" id="qAutoM" value="auto"><span>Auto</span></label>
+        <label for="qBajaM"><input type="radio" name="qualM" id="qBajaM" value="baja"><span>Baja</span></label>
+        <label for="qMediaM"><input type="radio" name="qualM" id="qMediaM" value="media"><span>Media</span></label>
+        <label for="qAltaM"><input type="radio" name="qualM" id="qAltaM" value="alta"><span>Alta</span></label>
+      </div>
+      <small class="qnote" id="qNoteM"></small>
+    </div>
     <label class="mode" for="survivalM">
       <input id="survivalM" type="checkbox">
       <span><b>Modo supervivencia</b><small>La vida no se recupera: ni al superar una oleada ni con botiquines.</small></span>
@@ -312,6 +335,16 @@ kbd{background:rgba(255,255,255,.06);border:1px solid var(--line);border-bottom-
     <div class="vols">
       <label class="vol" for="musicVolP"><span class="lbl">Música</span><input id="musicVolP" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
       <label class="vol" for="sfxVolP"><span class="lbl">Efectos</span><input id="sfxVolP" type="range" min="0" max="100" step="1" value="80"><b>80%</b></label>
+    </div>
+    <div class="qual" role="radiogroup" aria-label="Calidad gráfica">
+      <span class="lbl">Gráficos</span>
+      <div class="seg">
+        <label for="qAutoP"><input type="radio" name="qualP" id="qAutoP" value="auto"><span>Auto</span></label>
+        <label for="qBajaP"><input type="radio" name="qualP" id="qBajaP" value="baja"><span>Baja</span></label>
+        <label for="qMediaP"><input type="radio" name="qualP" id="qMediaP" value="media"><span>Media</span></label>
+        <label for="qAltaP"><input type="radio" name="qualP" id="qAltaP" value="alta"><span>Alta</span></label>
+      </div>
+      <small class="qnote" id="qNoteP"></small>
     </div>
     <button class="go" id="resumeBtn" type="button">Continuar</button>
   </div>
@@ -391,9 +424,32 @@ const canvas=$('c');
 (function(){const c=document.createElement('canvas');c.width=c.height=160;const g=c.getContext('2d'),d=g.createImageData(160,160);
   for(let i=0;i<d.data.length;i+=4){const v=Math.random()*255|0;d.data[i]=d.data[i+1]=d.data[i+2]=v;d.data[i+3]=255;}g.putImageData(d,0,0);
   $('grain').style.backgroundImage='url('+c.toDataURL()+')';})();
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));
-renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+/* ================= GRAPHICS QUALITY ================= */
+// Three presets. "Auto" picks one from the graphics card's name and steps down while playing if the frame rate drops.
+// Edge smoothing (MSAA) can only be chosen when the WebGL context is created, so it follows the level known at load.
+const QP={
+  baja: {name:'Baja', scale:.7,max:1,  shadows:false,map:512, soft:false,env:false,bump:false,grass:0,  flowers:0,  zShadow:false,parts:220,puffs:70, far:230,ovMax:1,  glass:false},
+  media:{name:'Media',scale:1, max:1,  shadows:true, map:1024,soft:false,env:true, bump:false,grass:.45,flowers:.5,zShadow:false,parts:420,puffs:140,far:320,ovMax:1.5,glass:false},
+  alta: {name:'Alta', scale:1, max:1.5,shadows:true, map:2048,soft:true, env:true, bump:true, grass:1,  flowers:1,  zShadow:true, parts:650,puffs:220,far:440,ovMax:2,  glass:true},
+};
+const Q_ORDER=['baja','media','alta'];
+function guessQuality(){
+  try{
+    const c=document.createElement('canvas'),gl=c.getContext('webgl');if(!gl)return'baja';
+    const ext=gl.getExtension('WEBGL_debug_renderer_info');
+    const r=String(ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER));
+    const lose=gl.getExtension('WEBGL_lose_context');if(lose)lose.loseContext();
+    if(/RTX|RX\s?[67]\d{3}|Radeon Pro W|Apple M[1-9]/i.test(r))return'alta';
+    if(/SwiftShader|llvmpipe|Intel|Mali|Adreno|PowerVR|\bMX\s?\d|GTX\s?(6|7|9|10)\d\d|GeForce\s?(GT\s|[4-9]\d\d)|Radeon\(TM\)\s?(Vega|Graphics)|Radeon Graphics/i.test(r))return'baja';
+    return'media';
+  }catch(_){return'media';}
+}
+let qPref='auto';try{const v=localStorage.getItem('torreZombiQuality');if(v&&(v==='auto'||QP[v]))qPref=v;}catch(_){}
+const qGuess=guessQuality();
+let qLevel=qPref==='auto'?qGuess:qPref,Q=QP[qLevel];
+const msaa=qLevel==='alta';
+const renderer=new THREE.WebGLRenderer({canvas,antialias:msaa,powerPreference:'high-performance'});
+renderer.shadowMap.enabled=Q.shadows;renderer.shadowMap.type=Q.soft?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
 renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x9fdcf5);
@@ -403,7 +459,7 @@ camera.rotation.order='YXZ';
 scene.add(camera);
 const hemi=new THREE.HemisphereLight(0xffffff,0x6a8a4a,.75);scene.add(hemi);
 const sun=new THREE.DirectionalLight(0xfff2d8,.75);
-sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
+sun.castShadow=true;sun.shadow.mapSize.set(Q.map,Q.map);
 Object.assign(sun.shadow.camera,{left:-55,right:55,top:55,bottom:-55,near:1,far:260});
 sun.shadow.bias=-.0006;sun.shadow.normalBias=.04;
 scene.add(sun);scene.add(sun.target);
@@ -517,6 +573,7 @@ function bakeEnv(){
   const sg=envG.createRadialGradient(u,v,0,u,v,36);sg.addColorStop(0,hex(e.sun));sg.addColorStop(1,'rgba(0,0,0,0)');
   envG.globalCompositeOperation='lighter';envG.fillStyle=sg;envG.fillRect(0,0,256,128);envG.globalCompositeOperation='source-over';
   envTex.needsUpdate=true;
+  if(!Q.env){scene.environment=null;return;}
   const rt=pmrem.fromEquirectangular(envTex);if(envRT)envRT.dispose();envRT=rt;scene.environment=rt.texture;
 }
 function blendEnv(k){ENV_C.forEach(c=>envCur[c].copy(envFrom[c]).lerp(envTo[c],k));ENV_N.forEach(n=>envCur[n]=envFrom[n]+(envTo[n]-envFrom[n])*k);applyEnv();}
@@ -554,6 +611,7 @@ for(let i=0;i<6;i++){
 }
 
 let cloudInst=null;const cloudPos=[];
+let grassIM=null,flowerIM=null;   // instanced grass and flowers; quality trims how many are drawn
 (function(){
   const r=rng(42),trees=[];
   for(let i=0;i<60;i++){const a=r()*Math.PI*2,d=i<7?20+r()*8:32+r()*100;trees.push([Math.cos(a)*d,Math.sin(a)*d,2.6+r()*2.6,r()]);}
@@ -596,7 +654,7 @@ let cloudInst=null;const cloudPos=[];
     c.setHex([0xb0503a,0xc8a83a,0xd8d4c8,0x8a74a8,0x9a8a5a][(r()*5)|0]);flower.setColorAt(i,c);}
   tuft.instanceMatrix.needsUpdate=flower.instanceMatrix.needsUpdate=true;
   if(tuft.instanceColor)tuft.instanceColor.needsUpdate=true;if(flower.instanceColor)flower.instanceColor.needsUpdate=true;
-  tuft.receiveShadow=true;scene.add(tuft,flower);
+  tuft.receiveShadow=true;scene.add(tuft,flower);grassIM=tuft;flowerIM=flower;
   cloudM=Mat({color:0xffffff,gradientMap:grad,fog:false});
   const cl=new THREE.InstancedMesh(blobG,cloudM,14*4);cloudInst=cl;
   for(let i=0;i<14;i++){cloudPos.push([-170+r()*340,55+r()*16,-170+r()*340,4+r()*4]);}
@@ -657,6 +715,8 @@ function spawnZombie(kind,x,z,hpMul,spdMul){
     state:'walk',t:Math.random()*6,vx:0,vy:0,vz:0,flash:0,flashing:false,dead:false,deadT:0,onTop:false,landed:false,squash:0,
     parts,mats:parts.map(p=>p.material),legL:legL.p,legR:legR.p,armL:armL.p,armR:armR.p,head,body,stars,ang:0,dizzy:0,
     groan:rand(.5,6),fallFrom:0,wob:Math.random()*6,bs:kb,female,voice:null};
+  // below the top level only torso and head cast shadows: a horde's limbs are many draw calls for little gain
+  if(!Q.zShadow)g.traverse(o=>{if(o.isMesh&&o!==body&&o!==head)o.castShadow=false;});
   zombies.push(zb);return zb;
 }
 function removeZombie(i){stopVoice(zombies[i]);scene.remove(zombies[i].g);zombies.splice(i,1);}
@@ -897,7 +957,7 @@ const pm=(c,basic)=>{const k=c+(basic?'b':'');return pmats[k]||(pmats[k]=basic?g
 const parts=[],pool=[];
 function burst(x,y,z,n,color,spd,size,life,grav,basic,up){
   for(let i=0;i<n;i++){
-    if(parts.length>650)break;
+    if(parts.length>Q.parts)break;
     let m=pool.pop();if(!m){m=new THREE.Mesh(chunkG);scene.add(m);}
     m.material=pm(color,basic);m.visible=true;m.position.set(x,y,z);m.rotation.set(Math.random()*3,Math.random()*3,0);
     const s=size*rand(.6,1.4);m.scale.setScalar(s);const l=life*rand(.6,1.2);
@@ -918,7 +978,7 @@ function updateParts(dt){
 const puffs=[];
 function puff(x,y,z,n,size,color,spread,life,basic){
   for(let i=0;i<n;i++){
-    if(puffs.length>220)break;
+    if(puffs.length>Q.puffs)break;
     const mat=new THREE.SpriteMaterial({map:smokeTex,color:basic?new THREE.Color(color):lin(color),transparent:true,depthWrite:false,
       blending:basic?THREE.AdditiveBlending:THREE.NormalBlending,fog:!basic,rotation:Math.random()*6.28});
     const m=new THREE.Sprite(mat);m.position.set(x+rand(-spread,spread),y+rand(-spread*.5,spread),z+rand(-spread,spread));m.scale.setScalar(.01);scene.add(m);
@@ -978,7 +1038,7 @@ function updateDecals(dt){for(let i=decals.length-1;i>=0;i--){const d=decals[i];
 // overlay canvas: crosshair + floating damage numbers, painted every frame without touching the page layout
 const ov=$('ov'),og=ov.getContext('2d'),nums=[],pv=new THREE.Vector3();
 let ovW=0,ovH=0,ovDpr=1,hitT=0,crossX=0,crossY=0;
-function sizeOv(){ovDpr=Math.min(window.devicePixelRatio||1,2);ovW=window.innerWidth;ovH=window.innerHeight;ov.width=Math.round(ovW*ovDpr);ov.height=Math.round(ovH*ovDpr);}
+function sizeOv(){ovDpr=Math.min(window.devicePixelRatio||1,Q.ovMax);ovW=window.innerWidth;ovH=window.innerHeight;ov.width=Math.round(ovW*ovDpr);ov.height=Math.round(ovH*ovDpr);}
 sizeOv();window.addEventListener('resize',sizeOv);
 // bite marks: a few variants drawn once (bruise, two arched rows of tooth punctures, blood runs), stamped when bitten
 function makeBite(seed){
@@ -1010,7 +1070,7 @@ function screenInfo(x,y,z){
   const dx=csv.x,dy=Math.abs(csv.x)+Math.abs(csv.y)<1e-3?-1:csv.y;
   return{on,sx:(pv.x*.5+.5)*ovW,sy:(-pv.y*.5+.5)*ovH,ang:Math.atan2(-dy,dx)};
 }
-let edgeBottom=0;   // lowest y an edge arrow may use: just above the health/ammo panel
+let edgeBottom=0,edgeMeasure=0;   // lowest y an edge arrow may use: just above the health/ammo panel
 function edgeTriangle(ang,size,color,alpha){
   const cx=ovW/2,cy=ovH/2,px=cx+Math.cos(ang)*ovW*.43,py=Math.min(cy+Math.sin(ang)*ovH*.4,edgeBottom);
   og.save();og.translate(px,py);og.rotate(ang);og.globalAlpha=alpha;
@@ -1019,7 +1079,9 @@ function edgeTriangle(ang,size,color,alpha){
 }
 // climbers: a marker over the ones in view, an arrow at the screen edge for the rest, and a count; amber turns red near the top
 function drawClimbers(){
-  let n=0;const bars=document.querySelector('.bars');edgeBottom=(bars?bars.getBoundingClientRect().top:ovH)-22;
+  let n=0;
+  // measure the panel once in a while instead of every frame
+  if(--edgeMeasure<=0){edgeMeasure=30;const bars=document.querySelector('.bars');edgeBottom=(bars?bars.getBoundingClientRect().top:ovH)-22;}
   for(const zb of zombies){
     if(zb.dead||zb.state!=='climb')continue;n++;
     const P=zb.g.position,prog=P.y/H,danger=prog>.72,pulse=danger?.55+.45*Math.abs(Math.sin(gtime*9)):.85;
@@ -1718,6 +1780,52 @@ $('reloadBtn').addEventListener('pointerdown',e=>{e.preventDefault();if(state===
 $('kickBtn').addEventListener('pointerdown',e=>{e.preventDefault();doKick();});
 $('pauseBtn').addEventListener('click',()=>{if(state==='play')pauseGame();});
 
+/* ================= APPLYING GRAPHICS QUALITY ================= */
+const baseM=base.material;
+function applyQuality(level){
+  const before={shadows:renderer.shadowMap.enabled,type:renderer.shadowMap.type,env:Q.env,bump:Q.bump};
+  qLevel=level;Q=QP[level];
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,Q.max)*Q.scale);resize();sizeOv();
+  renderer.shadowMap.enabled=Q.shadows;renderer.shadowMap.type=Q.soft?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
+  if(sun.shadow.mapSize.x!==Q.map){sun.shadow.mapSize.set(Q.map,Q.map);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}}
+  stoneM.bumpMap=baseM.bumpMap=Q.bump?stoneBump:null;
+  if(grassIM)grassIM.count=Math.floor(grassIM.instanceMatrix.count*Q.grass);
+  if(flowerIM)flowerIM.count=Math.floor(flowerIM.instanceMatrix.count*Q.flowers);
+  // a shorter view distance culls far trees; the sky dome shrinks to stay inside it
+  camera.far=Q.far;camera.updateProjectionMatrix();sky.scale.setScalar(Math.min(1,Q.far*.86/380));
+  bakeEnv();
+  document.body.classList.toggle('q-lite',!Q.glass);filterKey='';if(!Q.glass)canvas.style.filter='';
+  // shadows, sky lighting and stone relief are compiled into the shaders, so those changes rebuild them
+  if(before.shadows!==Q.shadows||before.type!==renderer.shadowMap.type||before.env!==Q.env||before.bump!==Q.bump)
+    scene.traverse(o=>{if(o.material)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{m.needsUpdate=true;});});
+  syncQualityUI();
+}
+const Q_UI=[['M','qNoteM'],['P','qNoteP']];
+function syncQualityUI(){
+  for(const [sfx,noteId] of Q_UI){
+    const r=document.querySelector('input[name="qual'+sfx+'"][value="'+qPref+'"]');if(r)r.checked=true;
+    let note=qPref==='auto'?'Auto usa '+Q.name+' en esta gráfica y baja sola si el juego se pone lento.':'';
+    if(qLevel==='alta'&&!msaa)note+=(note?' ':'')+'El suavizado de bordes se activa al recargar la página.';
+    $(noteId).textContent=note;
+  }
+}
+document.querySelectorAll('input[name="qualM"],input[name="qualP"]').forEach(r=>r.addEventListener('change',e=>{
+  qPref=e.target.value;try{localStorage.setItem('torreZombiQuality',qPref);}catch(_){}
+  applyQuality(qPref==='auto'?qGuess:qPref);
+}));
+// Auto mode: measure the real frame rate in play and step one level down when it stays under ~42 FPS.
+// Two slow windows in a row are required, so a one-off hitch (shaders compiling on first use) does not count.
+let fpsTime=0,fpsFrames=0,qCooldown=5,slowWindows=0;
+function watchFrameRate(raw){
+  if(qPref!=='auto'||state!=='play'||raw>.5)return;
+  fpsTime+=raw;fpsFrames++;qCooldown-=raw;
+  if(fpsTime<2.5)return;
+  const fps=fpsFrames/fpsTime,i=Q_ORDER.indexOf(qLevel);fpsTime=0;fpsFrames=0;
+  slowWindows=fps<42?slowWindows+1:0;
+  if(slowWindows>=2&&i>0&&qCooldown<=0){applyQuality(Q_ORDER[i-1]);qCooldown=6;slowWindows=0;toast('Calidad automática','Bajada a '+Q.name+' · '+Math.round(fps)+' FPS');}
+}
+applyQuality(qLevel);
+
 /* ================= GAME FLOW ================= */
 const menuEl=$('menu'),pauseEl=$('pause'),overEl=$('over'),hudEl=$('hud');
 // survival mode: chosen in the menu (remembered in this browser), fixed for the length of a game, with its own record
@@ -1843,7 +1951,7 @@ function updatePlay(dt){
   hud.vig.style.opacity=Math.min(.85,hurtFlash+(player.hp<30?.25+Math.sin(performance.now()/200)*.1:0));
   if(player.hp<35){heartT-=dt;if(heartT<=0){SFX.heart();heartT=.55+player.hp/35*.5;}}
   const fk=player.hp<35?String(Math.round(player.hp/5)):'';
-  if(fk!==filterKey){filterKey=fk;canvas.style.filter=fk?'saturate('+(.35+player.hp/35*.65).toFixed(2)+')':'';}
+  if(fk!==filterKey){filterKey=fk;canvas.style.filter=fk&&Q.glass?'saturate('+(.35+player.hp/35*.65).toFixed(2)+')':'';}
   climbing=0;onTopN=0;for(const z of zombies){if(z.dead)continue;if(z.state==='top')onTopN++;else if(z.state==='climb')climbing++;}
   hud.warn.hidden=onTopN===0;
   if(iceT>0&&Math.random()<dt*6){const z=zombies[(Math.random()*zombies.length)|0];if(z&&!z.dead)burst(z.g.position.x,z.g.position.y+1.2*z.s,z.g.position.z,1,0xbfefff,.8,.06,.6,2,true);}
@@ -1864,7 +1972,8 @@ function updateMenu(dt){
 let last=performance.now(),envBake=0;
 function frame(now){
   if(!isCurrentRun()){try{if(AC&&AC.state!=='closed')AC.close();}catch(_){}return;}
-  const rdt=Math.min(.05,(now-last)/1000);last=now;
+  const raw=(now-last)/1000,rdt=Math.min(.05,raw);last=now;
+  watchFrameRate(raw);
   let ts=1;if(slowT>0){slowT-=rdt;ts=.28;}
   const dt=rdt*ts;
   if(envT<1){envT=Math.min(1,envT+rdt/7);blendEnv(envT*envT*(3-2*envT));envBake-=rdt;if(envBake<=0||envT>=1){envBake=1.5;bakeEnv();}}
